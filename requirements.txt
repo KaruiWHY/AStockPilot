@@ -1,0 +1,6 @@
+openai>=1.0.0
+baostock
+pandas
+python-dotenv>=1.0.0
+streamlit>=1.36.0
+plotly>=5.22.0
