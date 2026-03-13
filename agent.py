@@ -11,6 +11,7 @@ import mimetypes
 import openai
 
 from tools import stock_tools
+from tools import financial_tools
 
 
 class config:
@@ -52,9 +53,11 @@ class MyAgent:
                     "今天是{today_date}".format(today_date=self.get_today_date()) +
                     "。你是一名专业的股票量化交易与投资者，专注于 A 股市场，投资倾向为激进型，维持长期收益的条件下，寻求适合的策略。"
                     "你可以通过工具获取：实时行情、历史 K 线、股票搜索、基本信息、技术指标（MA、MACD、RSI、布林带、波动率等）。"
+                    "你也可以获取财务数据：资产负债表、利润表、现金流量表、盈利能力指标、偿债能力指标、成长能力指标、杜邦分析等。"
                     "当用户希望验证策略可行性时，可调用回测工具评估收益、回撤、夏普和胜率。"
                     "当用户希望进行选股时，可调用因子选股工具筛选候选股票并给出打分依据。"
                     "当用户希望得到可执行候选（含仓位与风控）时，可调用交易员选股决策工具。"
+                    "当用户询问公司基本面或财务状况时，可调用财报分析工具（analyze_financial_report、get_balance_sheet、get_income_statement等）。"
                     "请根据用户问题主动调用相应工具，结合量化数据给出分析结论，并可以给出具体的投资建议（如买入/卖出/观望、建议仓位、关注价位等）。"
                     "投资建议需基于技术指标与数据支撑，并简要说明理由。"
                     "分析具体个股时，必须同时调用 get_market_overview 获取大盘（上证、深证、创业板）行情，"
@@ -79,6 +82,16 @@ class MyAgent:
             "backtest_ma_grid_search": stock_tools.backtest_ma_grid_search,
             "screen_stocks_by_factors": stock_tools.screen_stocks_by_factors,
             "select_stocks_for_trader": stock_tools.select_stocks_for_trader,
+            # 财报分析工具
+            "get_balance_sheet": financial_tools.get_balance_sheet,
+            "get_income_statement": financial_tools.get_income_statement,
+            "get_cash_flow_statement": financial_tools.get_cash_flow_statement,
+            "get_profitability_indicators": financial_tools.get_profitability_indicators,
+            "get_solvency_indicators": financial_tools.get_solvency_indicators,
+            "get_growth_indicators": financial_tools.get_growth_indicators,
+            "get_dupont_analysis": financial_tools.get_dupont_analysis,
+            "get_financial_report_history": financial_tools.get_financial_report_history,
+            "analyze_financial_report": financial_tools.analyze_financial_report,
         }
     
     def get_today_date(self):
@@ -88,7 +101,10 @@ class MyAgent:
         today = date.today()
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         return f"{today.strftime('%Y-%m-%d')} {weekdays[today.weekday()]}"
-
+    def reset(self):
+        """重置对话历史和摘要。"""
+        self.conversation_history = []
+        self.summary = ""
     def _define_stock_tools(self):
         """定义股票分析相关工具的 schema，供 LLM 与 API 使用。"""
         return [
@@ -284,6 +300,160 @@ class MyAgent:
                             "with_plots": {"type": "boolean", "description": "是否输出横向对比图与风控参数图（HTML 文件路径）。默认 false。", "default": False},
                         },
                         "required": ["start_date", "end_date"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            # ========== 财报分析工具 ==========
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_balance_sheet",
+                    "description": "获取资产负债表数据，包括资产总计、负债合计、所有者权益、流动比率、资产负债率等。用于分析公司财务结构和偿债能力。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码，如 600000"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_income_statement",
+                    "description": "获取利润表数据，包括营业收入、净利润、毛利率、净利率、每股收益等。用于分析公司盈利能力。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_cash_flow_statement",
+                    "description": "获取现金流量表数据，包括经营/投资/筹资活动现金流。用于分析公司现金流质量和造血能力。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_profitability_indicators",
+                    "description": "获取盈利能力指标，包括ROE、ROA、毛利率、净利率、营业利润率等。评估公司盈利能力和股东回报。ROE≥15%为优秀。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_solvency_indicators",
+                    "description": "获取偿债能力指标，包括流动比率、速动比率、资产负债率等。评估公司财务风险和偿债能力。流动比率≥2、资产负债率≤50%为良好。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_growth_indicators",
+                    "description": "获取成长能力指标，包括营收增长率、净利润增长率、总资产增长率等。评估公司成长性。增速>20%为高速成长。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_dupont_analysis",
+                    "description": "杜邦分析：将ROE分解为净利率×资产周转率×权益乘数，帮助理解ROE驱动因素。分析盈利质量、运营效率和财务杠杆。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "quarter": {"type": "integer", "description": "报告季度1-4，默认4（年报）"},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_financial_report_history",
+                    "description": "获取多期财报数据对比（默认近3年），查看财务指标历史趋势。支持输出趋势图表HTML文件。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "years": {"type": "integer", "description": "对比年数，默认3年", "default": 3},
+                            "with_plots": {"type": "boolean", "description": "是否生成趋势图表", "default": False},
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "analyze_financial_report",
+                    "description": "综合财报分析：整合资产负债表、利润表、现金流量表，计算盈利/偿债/成长能力，进行杜邦分析，给出综合评分（0-100分）和投资建议。分析公司财报时优先调用此工具。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string", "description": "股票代码"},
+                            "year": {"type": "integer", "description": "报告年份，默认最近一年"},
+                            "with_plots": {"type": "boolean", "description": "是否生成图表", "default": False},
+                        },
+                        "required": ["symbol"],
                         "additionalProperties": False,
                     },
                 },

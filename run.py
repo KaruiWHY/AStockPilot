@@ -55,11 +55,23 @@ def main():
         if user_input.lower() in ("exit", "quit"):
             print("再见！")
             break
+
+        if user_input.lower() in ("clear", "cls"):
+            os.system("cls" if os.name == "nt" else "clear") # 清屏命令
+            print(color_logo + logo + reset_color)
+            print("股票分析 Agent：支持行情、历史 K 线、技术指标、量化分析与投资建议。输入 'exit' 或 'quit' 退出。\n")
+            continue
+
+        if user_input.lower() in ("new", "reset"):
+            agent.reset()
+            print("对话已重置。\n")
+            continue
+
         if not user_input:
             continue
         try:
             response = agent.generate_response(user_input, max_tool_rounds=10)
-            print(f"\n助手: {response}\n")
+            # print(f"\n助手: {response}\n")
         except Exception as exc:
             print(f"请求失败: {exc}\n")
 

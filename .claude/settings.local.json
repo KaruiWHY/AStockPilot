@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd E:/0Research/LLM/MyAgent && python test_financial_tools.py)"
+    ]
+  }
+}
