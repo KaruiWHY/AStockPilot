@@ -4,17 +4,16 @@
 可基于数据给出投资建议。仅供参考，不构成任何投资决策依据。
 """
 import os
-import json
 import base64
 import mimetypes
 
-import openai
-
+from base_agent import BaseAgent, BaseAgentConfig
 from tools import stock_tools
 from tools import financial_tools
 
 
-class config:
+class StockAgentConfig(BaseAgentConfig):
+    """股票分析 Agent 配置。"""
     def __init__(
         self,
         token=None,
@@ -23,91 +22,43 @@ class config:
         max_context_tokens=6000,
         max_recent_turns=8,
     ):
-        self.token = token if token is not None else os.getenv("GITHUB_TOKEN")
-        self.endpoint = endpoint
-        self.model = model
-        self.max_context_tokens = max_context_tokens
-        self.max_recent_turns = max_recent_turns
+        super().__init__(
+            token=token,
+            endpoint=endpoint,
+            model=model,
+            max_context_tokens=max_context_tokens,
+            max_recent_turns=max_recent_turns,
+        )
 
 
-class MyAgent:
+class StockAgent(BaseAgent):
     """
-    A simple agent that uses the OpenAI API to generate responses.
+    股票技术分析 Agent：专注于行情查询、技术指标、选股筛选与策略回测。
+    特有功能：图片输入、流式输出。
     """
-    def __init__(self, config):
-        self.api_key = config.token
-        if not self.api_key:
-            raise ValueError("Please set the GITHUB_TOKEN environment variable.")
-        self.endpoint = config.endpoint
-        self.model = config.model
-        self.max_context_tokens = config.max_context_tokens
-        self.max_recent_turns = config.max_recent_turns
 
-        # openai.api_key = self.api_key
-        self.client = openai.OpenAI(api_key=self.api_key, base_url=self.endpoint)
+    def _build_system_message(self) -> str:
+        """构建系统消息。"""
+        return (
+            f"今天是{self._get_today_date()}。"
+            "你是一名专业的股票量化交易与投资者，专注于 A 股市场，投资倾向为激进型，维持长期收益的条件下，寻求适合的策略。"
+            "你可以通过工具获取：实时行情、历史 K 线、股票搜索、基本信息、技术指标（MA、MACD、RSI、布林带、波动率等）。"
+            "你也可以获取财务数据：资产负债表、利润表、现金流量表、盈利能力指标、偿债能力指标、成长能力指标、杜邦分析等。"
+            "当用户希望验证策略可行性时，可调用回测工具评估收益、回撤、夏普和胜率。"
+            "当用户希望进行选股时，可调用因子选股工具筛选候选股票并给出打分依据。"
+            "当用户希望得到可执行候选（含仓位与风控）时，可调用交易员选股决策工具。"
+            "当用户询问公司基本面或财务状况时，可调用财报分析工具（analyze_financial_report、get_balance_sheet、get_income_statement等）。"
+            "请根据用户问题主动调用相应工具，结合量化数据给出分析结论，并可以给出具体的投资建议（如买入/卖出/观望、建议仓位、关注价位等）。"
+            "投资建议需基于技术指标与数据支撑，并简要说明理由。"
+            "分析具体个股时，必须同时调用 get_market_overview 获取大盘（上证、深证、创业板）行情，"
+            "结合大盘走势与个股表现给出分析，例如大盘强势/弱势时对个股的影响、个股与大盘的强弱对比等。"
+            "股票代码可输入 6 位数字（如 600000、000001），工具会自动区分沪/深。"
+        )
 
-        self.system_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "今天是{today_date}".format(today_date=self.get_today_date()) +
-                    "。你是一名专业的股票量化交易与投资者，专注于 A 股市场，投资倾向为激进型，维持长期收益的条件下，寻求适合的策略。"
-                    "你可以通过工具获取：实时行情、历史 K 线、股票搜索、基本信息、技术指标（MA、MACD、RSI、布林带、波动率等）。"
-                    "你也可以获取财务数据：资产负债表、利润表、现金流量表、盈利能力指标、偿债能力指标、成长能力指标、杜邦分析等。"
-                    "当用户希望验证策略可行性时，可调用回测工具评估收益、回撤、夏普和胜率。"
-                    "当用户希望进行选股时，可调用因子选股工具筛选候选股票并给出打分依据。"
-                    "当用户希望得到可执行候选（含仓位与风控）时，可调用交易员选股决策工具。"
-                    "当用户询问公司基本面或财务状况时，可调用财报分析工具（analyze_financial_report、get_balance_sheet、get_income_statement等）。"
-                    "请根据用户问题主动调用相应工具，结合量化数据给出分析结论，并可以给出具体的投资建议（如买入/卖出/观望、建议仓位、关注价位等）。"
-                    "投资建议需基于技术指标与数据支撑，并简要说明理由。"
-                    "分析具体个股时，必须同时调用 get_market_overview 获取大盘（上证、深证、创业板）行情，"
-                    "结合大盘走势与个股表现给出分析，例如大盘强势/弱势时对个股的影响、个股与大盘的强弱对比等。"
-                    "股票代码可输入 6 位数字（如 600000、000001），工具会自动区分沪/深。"
-                ),
-            }
-        ]
-
-        self.conversation_history = []
-        self.summary = ""
-
-        self.tools = self._define_stock_tools()
-        self.tool_registry = {
-            "get_stock_quote": stock_tools.get_stock_quote,
-            "get_stock_history": stock_tools.get_stock_history,
-            "search_stock": stock_tools.search_stock,
-            "get_stock_basic": stock_tools.get_stock_basic,
-            "get_technical_analysis": stock_tools.get_technical_analysis,
-            "get_market_overview": stock_tools.get_market_overview,
-            "backtest_moving_average_strategy": stock_tools.backtest_moving_average_strategy,
-            "backtest_ma_grid_search": stock_tools.backtest_ma_grid_search,
-            "screen_stocks_by_factors": stock_tools.screen_stocks_by_factors,
-            "select_stocks_for_trader": stock_tools.select_stocks_for_trader,
-            # 财报分析工具
-            "get_balance_sheet": financial_tools.get_balance_sheet,
-            "get_income_statement": financial_tools.get_income_statement,
-            "get_cash_flow_statement": financial_tools.get_cash_flow_statement,
-            "get_profitability_indicators": financial_tools.get_profitability_indicators,
-            "get_solvency_indicators": financial_tools.get_solvency_indicators,
-            "get_growth_indicators": financial_tools.get_growth_indicators,
-            "get_dupont_analysis": financial_tools.get_dupont_analysis,
-            "get_financial_report_history": financial_tools.get_financial_report_history,
-            "analyze_financial_report": financial_tools.analyze_financial_report,
-        }
-    
-    def get_today_date(self):
-        """获取当前日期与星期。"""
-        from datetime import date
-
-        today = date.today()
-        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        return f"{today.strftime('%Y-%m-%d')} {weekdays[today.weekday()]}"
-    def reset(self):
-        """重置对话历史和摘要。"""
-        self.conversation_history = []
-        self.summary = ""
-    def _define_stock_tools(self):
-        """定义股票分析相关工具的 schema，供 LLM 与 API 使用。"""
+    def _define_tools(self) -> list:
+        """定义工具 schema。"""
         return [
+            # 行情工具
             {
                 "type": "function",
                 "function": {
@@ -210,6 +161,7 @@ class MyAgent:
                     },
                 },
             },
+            # 回测工具
             {
                 "type": "function",
                 "function": {
@@ -258,6 +210,7 @@ class MyAgent:
                     },
                 },
             },
+            # 选股工具
             {
                 "type": "function",
                 "function": {
@@ -304,7 +257,7 @@ class MyAgent:
                     },
                 },
             },
-            # ========== 财报分析工具 ==========
+            # 财报分析工具
             {
                 "type": "function",
                 "function": {
@@ -460,101 +413,136 @@ class MyAgent:
             },
         ]
 
-    def _estimate_tokens(self, messages):
-        total_chars = 0
-        for message in messages:
-            role = message.get("role", "")
-            content = message.get("content", "")
-            total_chars += len(str(role))
-
-            if isinstance(content, str):
-                total_chars += len(content)
-            elif isinstance(content, list):
-                for block in content:
-                    block_type = block.get("type")
-                    if block_type == "text":
-                        total_chars += len(block.get("text", ""))
-                    elif block_type == "image_url":
-                        # Do not count raw base64 length; treat image as bounded token cost.
-                        total_chars += 1200
-                    else:
-                        total_chars += len(str(block))
-            else:
-                total_chars += len(str(content))
-
-        return total_chars // 4 + 1
-
-    def _build_messages_with_context(self, user_input, user_content_override=None):
-        messages = list(self.system_messages)
-        if self.summary:
-            messages.append({"role": "system", "content": f"Conversation summary: {self.summary}"})
-
-        recent_history = self.conversation_history[-(self.max_recent_turns * 2):]
-        user_content = user_input if user_content_override is None else user_content_override
-        context_messages = recent_history + [{"role": "user", "content": user_content}]
-
-        # Always keep the latest user message; only prune older history.
-        while len(context_messages) > 1 and self._estimate_tokens(messages + context_messages) > self.max_context_tokens:
-            context_messages.pop(0) # Remove the oldest message until we fit within the token limit
-
-        return messages + context_messages
-
-    def _maybe_update_summary(self):
-        # TODO: Add summary trigger strategy.
-        # Example triggers:
-        # 1) Every N rounds, summarize early history into self.summary
-        # 2) When estimated context tokens exceed a threshold, summarize and shrink history
-        pass
-
-    def _serialize_tool_calls(self, tool_calls):
-        """Serialize tool calls into a format that can be sent to the API."""
-        return [
-            {
-                "id": tool_call.id,
-                "type": "function",
-                "function": {
-                    "name": tool_call.function.name,
-                    "arguments": tool_call.function.arguments,
-                },
-            }
-            for tool_call in tool_calls
-        ]
-
-    def _execute_tool_call(self, tool_call):
-        """Execute a tool call and return the tool response."""
-        function_name = tool_call.function.name
-        tool_func = self.tool_registry.get(function_name)
-
-        if tool_func is None:
-            result = {"error": f"未知工具: {function_name}"}
-        else:
-            try:
-                arguments = json.loads(tool_call.function.arguments or "{}")
-            except json.JSONDecodeError:
-                arguments = {}
-
-            try:
-                raw = tool_func(**arguments)
-                result = raw if isinstance(raw, dict) else {"result": raw}
-            except Exception as exc:
-                result = {"error": f"工具执行失败: {str(exc)}"}
-
+    def _build_tool_registry(self) -> dict:
+        """构建工具注册表。"""
         return {
-            "role": "tool",
-            "tool_call_id": tool_call.id,
-            "name": function_name,
-            "content": json.dumps(result, ensure_ascii=False),
+            "get_stock_quote": stock_tools.get_stock_quote,
+            "get_stock_history": stock_tools.get_stock_history,
+            "search_stock": stock_tools.search_stock,
+            "get_stock_basic": stock_tools.get_stock_basic,
+            "get_technical_analysis": stock_tools.get_technical_analysis,
+            "get_market_overview": stock_tools.get_market_overview,
+            "backtest_moving_average_strategy": stock_tools.backtest_moving_average_strategy,
+            "backtest_ma_grid_search": stock_tools.backtest_ma_grid_search,
+            "screen_stocks_by_factors": stock_tools.screen_stocks_by_factors,
+            "select_stocks_for_trader": stock_tools.select_stocks_for_trader,
+            # 财报分析工具
+            "get_balance_sheet": financial_tools.get_balance_sheet,
+            "get_income_statement": financial_tools.get_income_statement,
+            "get_cash_flow_statement": financial_tools.get_cash_flow_statement,
+            "get_profitability_indicators": financial_tools.get_profitability_indicators,
+            "get_solvency_indicators": financial_tools.get_solvency_indicators,
+            "get_growth_indicators": financial_tools.get_growth_indicators,
+            "get_dupont_analysis": financial_tools.get_dupont_analysis,
+            "get_financial_report_history": financial_tools.get_financial_report_history,
+            "analyze_financial_report": financial_tools.analyze_financial_report,
         }
 
-    def run(self, user_input, picture_path=None):
-        # 支持流式输出的接口
-        print("Streaming response by {}".format(self.model))
+    # ===== StockAgent 特有方法：图片输入、流式输出 =====
+
+    def _picture_to_base64(self, image_path: str) -> str:
+        """将图片转换为 base64 编码。"""
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
+
+    def _build_user_content(self, user_input: str, picture_path: str = None):
+        """构建用户内容，支持图片输入。"""
+        if not picture_path:
+            return user_input
+
+        if not os.path.exists(picture_path):
+            raise FileNotFoundError(f"图片不存在: {picture_path}")
+
+        if os.path.getsize(picture_path) == 0:
+            raise ValueError(f"图片文件为空: {picture_path}")
+
+        mime_type, _ = mimetypes.guess_type(picture_path)
+        if mime_type is None:
+            mime_type = "image/jpeg"
+
+        image_base64 = self._picture_to_base64(picture_path)
+        image_url = f"data:{mime_type};base64,{image_base64}"
+
+        return [
+            {"type": "text", "text": user_input},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]
+
+    def generate_response(self, user_input: str, max_tool_rounds: int = 3, picture_path: str = None) -> str:
+        """
+        生成响应，支持多轮工具调用和图片输入。
+        :param user_input: 用户输入
+        :param max_tool_rounds: 最大工具调用轮数
+        :param picture_path: 图片路径（可选）
+        :return: 助手响应文本
+        """
+        user_content = self._build_user_content(user_input, picture_path)
+        messages = self._build_messages_with_context(user_input, user_content_override=user_content)
+        assistant_text = ""
+
+        for i in range(max_tool_rounds):
+            print(f"Round {i + 1}")
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=self.tools,
+                tool_choice="auto",
+                stream=False,
+            )
+
+            if not getattr(response, "choices", None):
+                assistant_text = "API返回为空，请稍后重试。"
+                break
+
+            assistant_message = response.choices[0].message
+            tool_calls = assistant_message.tool_calls
+
+            try:
+                print("___________________________________THINKING___________________________________")
+                print(assistant_message.reasoning_content)
+                print("___________________________________ANSWERING___________________________________")
+                print(assistant_message.content)
+            except Exception as exc:
+                print(f"Error accessing reasoning content: {exc}")
+
+            if not tool_calls:
+                assistant_text = assistant_message.content or ""
+                break
+
+            messages.append({
+                "role": "assistant",
+                "content": assistant_message.content or "",
+                "tool_calls": self._serialize_tool_calls(tool_calls),
+            })
+
+            for tool_call in tool_calls:
+                tool_message = self._execute_tool_call(tool_call)
+                messages.append(tool_message)
+        else:
+            assistant_text = "工具调用次数达到上限，请重试或缩小问题范围。"
+
+        user_history_text = user_input
+        if picture_path:
+            user_history_text = f"{user_input}\n[image: {os.path.basename(picture_path)}]"
+
+        self.conversation_history.append({"role": "user", "content": user_history_text})
+        self.conversation_history.append({"role": "assistant", "content": assistant_text})
+
+        return assistant_text
+
+    def run(self, user_input: str, picture_path: str = None) -> str:
+        """
+        流式输出响应。
+        :param user_input: 用户输入
+        :param picture_path: 图片路径（可选）
+        :return: 助手响应文本
+        """
+        print(f"Streaming response by {self.model}")
 
         user_content = self._build_user_content(user_input, picture_path)
         messages = self._build_messages_with_context(user_input, user_content_override=user_content)
-        print('=' * 20)
-        print(messages)
-        print('=' * 20)
+
         try:
             with self.client.chat.completions.create(
                 model=self.model,
@@ -579,132 +567,31 @@ class MyAgent:
                     for tool_call in tool_calls:
                         print(f"\n[Tool call: {tool_call['function']['name']} with arguments {tool_call['function']['arguments']}]\n", flush=True)
 
-            print()  # Print a newline after the streaming response is complete
+            print()
             return "".join(collected_response)
 
         except Exception as e:
             print("Error:", e)
-            return "API调用出错: {}".format(str(e))
+            return f"API调用出错: {str(e)}"
 
-    def generate_response(self, user_input, max_tool_rounds=3, picture_path=None):
-        user_content = self._build_user_content(user_input, picture_path)
-        messages = self._build_messages_with_context(user_input, user_content_override=user_content)
-        print('=' * 20)
-        print(messages)
-        print('=' * 20)
-        assistant_text = ""
-        # messages.append({"role": "assistant", "content": '用户您好，很高兴为您服务，根据我的分析，'})
 
-        for i in range(max_tool_rounds):
-            print("Round {}".format(i + 1))
-
-            print('=' * 20)
-            print(messages)
-            print('=' * 20)
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=self.tools,
-                tool_choice="auto",
-                stream=False
-                # max_tokens=1024,
-                # temperature=0.7,
-            )
-
-            if not getattr(response, "choices", None):
-                assistant_text = "API返回为空，请稍后重试。"
-                break
-
-            assistant_message = response.choices[0].message # 输出
-            tool_calls = assistant_message.tool_calls
-            # print("Thinking...")
-            try:
-                print("___________________________________THINKING___________________________________")
-                print(assistant_message.reasoning_content)
-                print("___________________________________ANSWERING___________________________________")
-                print(assistant_message.content)
-            # print("Tool calls:")
-            # print(tool_calls)
-            # print('=' * 20)
-            except Exception as exc:
-                print(f"Error accessing reasoning content: {exc}")
-            if not tool_calls:
-                assistant_text = assistant_message.content or ""
-                break
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": assistant_message.content or "",
-                    "tool_calls": self._serialize_tool_calls(tool_calls),
-                }
-            )
-
-            for tool_call in tool_calls:
-                tool_message = self._execute_tool_call(tool_call)
-                messages.append(tool_message)
-                # print(f"Executed {i + 1} tool call: {tool_message}")
-        else:
-            assistant_text = "工具调用次数达到上限，请重试或缩小问题范围。"
-
-        user_history_text = user_input
-        if picture_path:
-            user_history_text = f"{user_input}\n[image: {os.path.basename(picture_path)}]"
-
-        self.conversation_history.append({"role": "user", "content": user_history_text})
-        self.conversation_history.append({"role": "assistant", "content": assistant_text})
-        self._maybe_update_summary()
-
-        return assistant_text
-    
-    def string_to_json(self, string):
-        try:
-            return json.loads(string)
-        except json.JSONDecodeError:
-            return None
-        
-    def _picture_to_base64(self, image_path):
-        with open(image_path, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-        return encoded_string
-
-    def _build_user_content(self, user_input, picture_path=None):
-        if not picture_path:
-            return user_input
-
-        if not os.path.exists(picture_path):
-            raise FileNotFoundError(f"Image not found: {picture_path}")
-
-        if os.path.getsize(picture_path) == 0:
-            raise ValueError(f"Image file is empty: {picture_path}")
-
-        mime_type, _ = mimetypes.guess_type(picture_path)
-        if mime_type is None:
-            mime_type = "image/jpeg"
-
-        image_base64 = self._picture_to_base64(picture_path)
-        image_url = f"data:{mime_type};base64,{image_base64}"
-
-        # OpenAI multimodal content format: text + image_url blocks.
-        return [
-            {"type": "text", "text": user_input},
-            {"type": "image_url", "image_url": {"url": image_url}},
-        ]
+# 兼容旧名称
+MyAgent = StockAgent
+config = StockAgentConfig
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
 
-    My_config = config(
+    My_config = StockAgentConfig(
         token=os.getenv("LLM_API_KEY") or os.getenv("GITHUB_TOKEN"),
         endpoint=os.getenv("LLM_ENDPOINT", "https://llmapi.paratera.com"),
         model=os.getenv("LLM_MODEL", "MiniMax-M2.5"),
-        max_context_tokens=6000,
-        max_recent_turns=8,
     )
+
     try:
-        agent = MyAgent(My_config)
+        agent = StockAgent(My_config)
     except Exception as exc:
         print(f"初始化 Agent 失败: {exc}")
         raise
@@ -721,7 +608,6 @@ if __name__ == "__main__":
             picture_path = None
 
         try:
-            # response = agent.generate_response(user_input, picture_path=picture_path)
             response = agent.run(user_input, picture_path=picture_path)
             print(f"Assistant: {response}")
         except Exception as exc:
