@@ -158,7 +158,40 @@ class BaseAgent(ABC):
 
 ## 7. Agent 协作架构
 
-### 7.1 协作模式
+### 7.1 协作核心机制
+
+协作的关键是**上下文传递**：后续 Agent 可以获取前序 Agent 的分析结果。
+
+```python
+# 协作提示构建示例
+def _build_collaborative_prompt(base_prompt, context_keys):
+    """
+    将前序分析结果注入到后续 Agent 的提示中
+    """
+    # 技术分析结果 → 财务分析 Agent
+    # 技术分析 + 财务分析结果 → 交易规划 Agent
+```
+
+**完整分析流程的信息流：**
+```
+用户: /analyze 600000
+
+Step 1: StockAgent 技术分析
+    ↓ 提取结构化结果: {recommendation, score, indicators}
+    ↓ 存入 shared_context["stock_analysis"]
+
+Step 2: FinancialAgent 财务验证
+    ↓ 接收: shared_context["stock_analysis"]（技术分析结果）
+    ↓ 结合技术面进行财务验证
+    ↓ 存入 shared_context["financial_analysis"]
+
+Step 3: TradeAgent 交易规划
+    ↓ 接收: shared_context["stock_analysis"]（技术分析结果）
+    ↓ 接收: shared_context["financial_analysis"]（财务分析结果）
+    ↓ 综合两者制定交易计划
+```
+
+### 7.2 协作模式
 
 启动协作模式：
 
@@ -166,26 +199,37 @@ class BaseAgent(ABC):
 python run_coordinator.py
 ```
 
-支持三种协作模式：
-
-**模式一：智能路由（默认）**
+**模式一：完整分析（推荐）**
 ```
-用户输入 → 关键词识别 → 自动路由到对应 Agent
-```
-
-**模式二：顺序管道（Pipeline）**
-```
-StockAgent（选股） → FinancialAgent（财务验证） → TradeAgent（交易规划）
+/analyze 600000
+流程：技术分析 → 财务验证 → 交易规划（带上下文传递）
 ```
 
-**模式三：直接调用**
+**模式二：快速选股**
+```
+/quick 1000000
+流程：因子选股 → 组合交易计划
+```
+
+**模式三：财务验证**
+```
+/check 600000
+流程：财务分析 → 交易计划
+```
+
+**模式四：智能路由**
+```
+直接输入问题 → 自动路由到对应 Agent
+```
+
+**模式五：直接调用**
 ```
 /stock <问题>      # 直接调用 StockAgent
 /financial <问题>  # 直接调用 FinancialAgent
 /trade <问题>      # 直接调用 TradeAgent
 ```
 
-### 7.2 可用命令
+### 7.3 可用命令
 
 | 命令 | 说明 |
 |------|------|

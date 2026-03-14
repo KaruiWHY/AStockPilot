@@ -12,23 +12,32 @@ from coordinator import Coordinator, CoordinatorConfig
 def print_help():
     """打印帮助信息"""
     print("=" * 60)
-    print("Agent 协作模式")
+    print("Agent 协作模式（支持上下文传递）")
     print("=" * 60)
-    print("\n【核心命令】")
+    print("\n【协作工作流】")
+    print("  /analyze <代码>    - 完整分析：技术分析→财务验证→交易规划")
+    print("                       （后续Agent可获取前序分析结果）")
+    print("  /quick <资金>      - 快速选股：因子选股→组合交易计划")
+    print("  /check <代码>      - 财务验证：财务分析→交易计划")
+    print("\n【智能路由】")
     print("  /route <问题>      - 智能路由到对应 Agent")
-    print("  /analyze <代码>    - 完整分析流程（技术→财务→交易）")
-    print("  /quick <资金>      - 快速选股流程（技术选股→交易规划）")
-    print("  /check <代码>      - 财务验证流程（财务分析→交易规划）")
+    print("  直接输入问题也会自动路由")
     print("\n【直接调用】")
     print("  /stock <问题>      - 直接调用 StockAgent（技术分析）")
     print("  /financial <问题>  - 直接调用 FinancialAgent（财务分析）")
     print("  /trade <问题>      - 直接调用 TradeAgent（交易规划）")
     print("\n【状态管理】")
-    print("  /context           - 查看共享上下文")
+    print("  /summary           - 查看协作状态摘要")
+    print("  /context           - 查看完整共享上下文")
     print("  /log               - 查看执行日志")
     print("  /reset             - 重置所有 Agent")
     print("  /help              - 显示帮助")
     print("  exit/quit          - 退出")
+    print("=" * 60)
+    print("\n【协作机制说明】")
+    print("- 技术分析结果会传递给财务分析Agent")
+    print("- 技术和财务分析结果会传递给交易Agent")
+    print("- 交易计划基于综合分析制定")
     print("=" * 60)
 
 
@@ -154,14 +163,25 @@ def main():
                     if context:
                         print("\n共享上下文:")
                         for key, value in context.items():
-                            if key == "results":
+                            if value is None:
+                                continue
+                            if key == "stock_analysis" and isinstance(value, dict):
                                 print(f"  {key}:")
-                                for k, v in value.items():
-                                    print(f"    {k}: {v[:100]}..." if len(str(v)) > 100 else f"    {k}: {v}")
+                                print(f"    推荐: {value.get('recommendation', 'N/A')}")
+                                print(f"    原始响应: {value.get('raw_response', '')[:100]}...")
+                            elif key == "financial_analysis" and isinstance(value, dict):
+                                print(f"  {key}:")
+                                print(f"    推荐: {value.get('recommendation', 'N/A')}")
+                                print(f"    原始响应: {value.get('raw_response', '')[:100]}...")
+                            elif isinstance(value, str) and len(value) > 100:
+                                print(f"  {key}: {value[:100]}...")
                             else:
                                 print(f"  {key}: {value}")
                     else:
                         print("\n共享上下文为空")
+
+                elif cmd == "/summary":
+                    print(coordinator.get_summary())
 
                 elif cmd == "/log":
                     log = coordinator.get_execution_log()
