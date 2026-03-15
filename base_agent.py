@@ -208,7 +208,7 @@ class BaseAgent(ABC):
                 print(">>> Thinking...")
                 if hasattr(assistant_message, "reasoning_content") and assistant_message.reasoning_content:
                     content = assistant_message.reasoning_content
-                    print(content[:500] + "..." if len(content) > 500 else content)
+                    # print(content[:500] + "..." if len(content) > 500 else content)
             except Exception:
                 pass
 
